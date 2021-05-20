@@ -3,18 +3,17 @@ data/
 
 # Scala build files
 **/project/project
-**/project/target
 **/src/main/scala/project/
 **/src/main/scala/target/
-target/
+**/build.properties
+**/target
 
-# IDE
-**/metals.sbt
-.metals/
 
 # IDE
 .vscode/
+.metals/
+**/metals.sbt
 **/.DS_Store
-project/.bloop
+**/.bloop
 .bsp
 **/*.swp
