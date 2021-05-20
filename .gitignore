@@ -1,0 +1,20 @@
+# data
+data/
+
+# Scala build files
+**/project/project
+**/project/target
+**/src/main/scala/project/
+**/src/main/scala/target/
+target/
+
+# IDE
+**/metals.sbt
+.metals/
+
+# IDE
+.vscode/
+**/.DS_Store
+project/.bloop
+.bsp
+**/*.swp
