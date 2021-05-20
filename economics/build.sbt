@@ -1,4 +1,4 @@
-name := "m3_yourid"
+name := "m3_269883"
 version := "1.0"
 
 libraryDependencies += "org.rogach" %% "scallop" % "4.0.2"
