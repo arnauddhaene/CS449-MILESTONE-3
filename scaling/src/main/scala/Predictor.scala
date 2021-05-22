@@ -201,7 +201,11 @@ object Predictor {
     val trainNormalized = normalizedDeviations(train, userAverages)
     val processed = preprocess(trainNormalized)
 
-    val br = sc.broadcast(processed)
+    println("\t computed processed ratings")
+
+    val brProcessed = sc.broadcast(processed)
+
+    println("\t sent processed ratings to broadcast variable")
 
     //*****************************************************************************************************************
 
@@ -213,7 +217,7 @@ object Predictor {
       * @return top k cosine similarities
       */
     def topk(user: Int): (Int, IndexedSeq[(Int, Double)]) = {
-        val processed = br.value
+        val processed = brProcessed.value
 
         val userSimilarities = cosineSimilarities(processed, user)
 
@@ -222,23 +226,28 @@ object Predictor {
 
     //*****************************************************************************************************************
 
-    val topks = sc.parallelize(0 to conf_users).map(topk).collect().toMap
+    val topks = sc.parallelize(0 to conf_users - 1).map(topk).collect()
 
-    val knnBuilder = new CSCMatrix.Builder[Double](rows = conf_users, cols = conf_movies)
+    println("\t parallelized and collected topk computation")
 
-    (0 to conf_users).foreach(
-        u => {
-            topks.get(u).foreach(_.foreach {
+    val knnBuilder = new CSCMatrix.Builder[Double](rows = conf_users, cols = conf_users)
+
+    println("\t initialized knn builder")
+
+    topks.foreach {
+        case (u, lvs) => {
+            lvs.foreach {
                 case (v, s) => knnBuilder.add(u, v, s)
-            })
+            }
         }
-    )
+    }
 
-    println(knnBuilder.result())
+    val neighbors = knnBuilder.result()
+
+    println("\t retrieved knn builder result")
 
     //*****************************************************************************************************************
 
-    
     println("Loading test data from: " + conf.test())
     val testFile = Source.fromFile(conf.test())
     val testBuilder = new CSCMatrix.Builder[Double](rows=conf.users(), cols=conf.movies()) 
@@ -251,7 +260,106 @@ object Predictor {
 
     //*****************************************************************************************************************
 
-    println("Compute predictions on test data...")
+    /**
+      * User Specific Weighted Sum Deviations
+      *
+      * @param kNearestNeighbors
+      * @param normalizedDeviations
+      * 
+      * @return CSCMatrix[Double] of user specific weighted sum deviations
+      */
+    def weightedSumDeviations(
+        kNearestNeighbors: CSCMatrix[Double], normalizedDeviations: CSCMatrix[Double]
+    ): CSCMatrix[Double] = {
+
+        val nbUsers = normalizedDeviations.cols
+
+        val deviationsBuilder = new CSCMatrix.Builder[Double](rows = nbUsers,
+                                                              cols = normalizedDeviations.rows)
+
+
+        (0 to nbUsers - 1).foreach(
+            u => {
+                val neighs = kNearestNeighbors(u, 0 to nbUsers - 1).t.toDenseVector
+
+                val userNum = normalizedDeviations * neighs
+                val userDenom = normalizedDeviations.activeMask * abs(neighs)
+
+                for ((v, r) <- userNum.activeIterator) {
+                    val clippedWeigSumDev = if (userDenom(v) != 0.0) r / userDenom(v) else 0.0
+
+                    deviationsBuilder.add(u, v, clippedWeigSumDev)
+                }
+            }
+        )
+
+        return deviationsBuilder.result()
+
+    }
+
+    def predictor(userSpecWeightDev : CSCMatrix[Double], test : CSCMatrix[Double]): CSCMatrix[Double] = {
+    
+        val predictionBuilder = new CSCMatrix.Builder[Double](rows = test.rows, cols = test.cols)
+
+        for ( ((u, i), r) <- test.activeIterator ) {
+            val uAvg = userAverages(u)
+            val uDev = userSpecWeightDev(u, i)
+
+            predictionBuilder.add(u, i, uAvg + uDev * scaler(uAvg + uDev, uAvg))
+        }
+
+        return predictionBuilder.result()
+
+    }
+
+    /**
+      * Mean Absolute Error of our predictions
+      *
+      * @param test: CSCMatrix[Double]
+      * @param predictions: CSCMatrix[Double]
+      * 
+      * @return CSCMatrix[Double] of each of the errors
+      */
+    def mae(test : CSCMatrix[Double], predictions : CSCMatrix[Double]): CSCMatrix[Double] = abs(test - predictions)
+
+    //*****************************************************************************************************************
+
+    val userSpecWeightDev = weightedSumDeviations(neighbors, trainNormalized)
+
+    val brWeightedSumDev = sc.broadcast(userSpecWeightDev)
+    val brUserAverages = sc.broadcast(train.perRowAverage)
+
+    //*****************************************************************************************************************
+
+    def predict(user: Int, item: Int): (Int, Int, Double) = {
+
+        val userSpecWeightDev = brWeightedSumDev.value
+        val userAverages = brUserAverages.value
+
+        val uAvg = userAverages(user)
+        val uDev = userSpecWeightDev(user, item)
+
+        return (user, item, uAvg + uDev * scaler(uAvg + uDev, uAvg))
+
+    }
+
+    //*****************************************************************************************************************
+
+    val prediction_start = System.nanoTime
+
+    val parPredictions = sc.parallelize(test.findAll(_ > 0.0))
+        .map { case (u, i) => predict(u, i) }.collect()
+
+    val predictionBuilder = new CSCMatrix.Builder[Double](rows = conf_users, cols = conf_movies)
+
+    parPredictions.foreach {
+        case (u, i, p) => predictionBuilder.add(u, i, p)
+    }
+
+    val predictions = predictionBuilder.result()
+        
+    val prediction_duration = System.nanoTime - prediction_start
+    println(s"Compute predictions on test data... [${(prediction_duration/pow(10.0, 9))} sec]")
 
     //*****************************************************************************************************************
 
@@ -273,7 +381,7 @@ object Predictor {
 
           val answers: Map[String, Any] = Map(
             "Q4.1.1" -> Map(
-              "MaeForK=200" -> 0.0  // Datatype of answer: Double
+              "MaeForK=200" -> sum(mae(test, predictions)) / test.activeSize  // Datatype of answer: Double
             ),
             // Both Q4.1.2 and Q4.1.3 should provide measurement only for a single run
             "Q4.1.2" ->  Map(
