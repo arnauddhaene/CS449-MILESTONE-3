@@ -12,6 +12,8 @@ import org.apache.spark.sql.SparkSession
 import org.apache.log4j.Logger
 import org.apache.log4j.Level
 
+import CSCMatrixFunctions._
+
 class Conf(arguments: Seq[String]) extends ScallopConf(arguments) {
   val train = opt[String](required = true)
   val test = opt[String](required = true)
@@ -19,9 +21,34 @@ class Conf(arguments: Seq[String]) extends ScallopConf(arguments) {
   val json = opt[String]()
   val users = opt[Int]()
   val movies = opt[Int]()
-  val separator = opt[String]()
+  val separator = opt[String](default=Option("\t"))
   verify()
 }
+
+//*****************************************************************************************************************
+
+class CSCMatrixFunctions(data : CSCMatrix[Double]) {
+
+    def activeMask: CSCMatrix[Double] = data.mapActiveValues(_ => 1.0)
+
+    def perRowAverage: DenseVector[Double] = {
+        val rowReducer = DenseVector.ones[Double](data.cols)
+        return (data * rowReducer) /:/ (data.mapActiveValues(_ => 1.0) * rowReducer)
+    }
+
+    def perColAverage: DenseVector[Double] = {
+        val colReducer = DenseVector.ones[Double](data.rows)
+        return (data * colReducer) /:/ (data.mapActiveValues(_ => 1.0) * colReducer)
+    }
+
+}
+
+object CSCMatrixFunctions {
+    implicit def addCSCMatrixFunctions(data : CSCMatrix[Double]) = new CSCMatrixFunctions(data)
+}
+
+//*****************************************************************************************************************
+
 
 object Predictor {
   def main(args: Array[String]) {
@@ -35,18 +62,133 @@ object Predictor {
     spark.sparkContext.setLogLevel("ERROR")
     val sc = spark.sparkContext
 
+    //*****************************************************************************************************************
+
+
     println("Loading training data from: " + conf.train())
     val read_start = System.nanoTime
     val trainFile = Source.fromFile(conf.train())
     val trainBuilder = new CSCMatrix.Builder[Double](rows=conf.users(), cols=conf.movies()) 
     for (line <- trainFile.getLines) {
         val cols = line.split(conf.separator()).map(_.trim)
-        trainBuilder.add(cols(0).toInt-1, cols(1).toInt-1, cols(2).toDouble)
+        trainBuilder.add(cols(0).toInt - 1, cols(1).toInt - 1, cols(2).toDouble)
     }
     val train = trainBuilder.result()
     trainFile.close
     val read_duration = System.nanoTime - read_start
-    println("Read data in " + (read_duration/pow(10.0,9)) + "s")
+    println("Read data in " + (read_duration/pow(10.0, 9)) + "s")
+
+    //*****************************************************************************************************************
+
+    /**
+      * Computes x scaled by the user average rating.
+      *
+      * @param x 
+      * @param userAvg
+      * 
+      * @return x scaled by userAvg
+      */
+    def scaler(x: Double, userAvg: Double): Double = {
+        x match {
+            case _ if x > userAvg => (5.0 - userAvg)
+            case _ if x < userAvg => (userAvg - 1.0)
+            case userAvg => 1.0
+        }
+    }
+
+    /**
+      * Normalized deviations
+      *
+      * @param ratings
+      * @param userAverages
+      * 
+      * @return CSCMatrix[Double]
+      */
+    def normalizedDeviations(
+        ratings: CSCMatrix[Double], userAverages: DenseVector[Double]
+    ): CSCMatrix[Double] = {
+
+        // ATTENTION: NORMALIZED DEVIATIONS ARE IMPLICITLY TRANSPOSED FOR DOWNSTREAM PURPOSES
+        val normDevBuilder = new CSCMatrix.Builder[Double](rows = ratings.cols, cols = ratings.rows)
+    
+        for ( ((u, i), r) <- ratings.activeIterator) {
+            normDevBuilder.add(i, u, 1.0 * (r - userAverages(u)) / scaler(r, userAverages(u)).toDouble)
+        }
+
+        return normDevBuilder.result()
+    }
+
+    /**
+      * Preprocess ratings following Equation 4 of Milestone 2
+      *
+      * @param trainNormalized: CSCMatrix[Double]
+      * @return CSCMatrix[Double] of preprocessed ratings
+      */
+    def preprocess(trainNormalized: CSCMatrix[Double]): CSCMatrix[Double] = {
+
+        val processBuilder = new CSCMatrix.Builder[Double](rows = trainNormalized.cols,
+                                                           cols = trainNormalized.rows)
+
+        val cosineSimilarityDenominator = 
+            sqrt(pow(trainNormalized, 2).t * DenseVector.ones[Double](trainNormalized.rows))
+
+        for ( ((i, u), r) <- trainNormalized.activeIterator ) {
+
+            val clippedRes = if (cosineSimilarityDenominator(u) != 0.0) r / cosineSimilarityDenominator(u) else 0.0
+
+            processBuilder.add(u, i, clippedRes)
+        }
+
+        return processBuilder.result()
+
+    }
+
+    /**
+      * Cosine Similarity calculator
+      *
+      * @param processed: CSCMatrix[Double]
+      * @param u: user similarities
+      * 
+      * @return user's cosine similarities with all other users
+      */
+    def cosineSimilarities(processed: CSCMatrix[Double], u: Int): DenseVector[Double] = {
+
+        val similarities = processed * processed(u, 0 to processed.cols - 1).t.toDenseVector
+
+        // Zero out user's self-similarity
+        similarities(u) = 0.0
+        
+        return similarities
+    }
+
+    /**
+      * Find k Nearest Neighbors for all users
+      *
+      * @param processed: preprocessed ratings
+      * @param k: top k Nearest Neighbors following cosine similarity
+      * 
+      * @return CSCMatrix[Double] of (User, User) -> Similarity sparse matrix
+      */
+    def kNearestNeighbors(processed: CSCMatrix[Double], k: Int): CSCMatrix[Double] = {
+
+        val neighborBuilder = new CSCMatrix.Builder[Double](rows = processed.rows, cols = processed.rows)
+
+        (0 to processed.rows - 1).foreach(
+            u => {
+                val userSimilarities = cosineSimilarities(processed, u)
+
+                for (v <- argtopk(userSimilarities, k)) {
+                    neighborBuilder.add(u, v, userSimilarities(v))
+                }
+            }
+        )
+
+        return neighborBuilder.result()
+
+    }
+
+    //*****************************************************************************************************************
+
 
     // conf object is not serializable, extract values that
     // will be serialized with the parallelize implementations
@@ -54,18 +196,64 @@ object Predictor {
     val conf_movies = conf.movies()
     val conf_k = conf.k()
     println("Compute kNN on train data...")
+
+    val userAverages = train.perRowAverage
+    val trainNormalized = normalizedDeviations(train, userAverages)
+    val processed = preprocess(trainNormalized)
+
+    val br = sc.broadcast(processed)
+
+    //*****************************************************************************************************************
+
+    /**
+      * Procedure mentioned in Part 4 of Milestone 3
+      *
+      * @param user: user id
+      * 
+      * @return top k cosine similarities
+      */
+    def topk(user: Int): (Int, IndexedSeq[(Int, Double)]) = {
+        val processed = br.value
+
+        val userSimilarities = cosineSimilarities(processed, user)
+
+        return (user, argtopk(userSimilarities, conf_k).map(v => (v, userSimilarities(v))))
+    }
+
+    //*****************************************************************************************************************
+
+    val topks = sc.parallelize(0 to conf_users).map(topk).collect().toMap
+
+    val knnBuilder = new CSCMatrix.Builder[Double](rows = conf_users, cols = conf_movies)
+
+    (0 to conf_users).foreach(
+        u => {
+            topks.get(u).foreach(_.foreach {
+                case (v, s) => knnBuilder.add(u, v, s)
+            })
+        }
+    )
+
+    println(knnBuilder.result())
+
+    //*****************************************************************************************************************
+
     
     println("Loading test data from: " + conf.test())
     val testFile = Source.fromFile(conf.test())
     val testBuilder = new CSCMatrix.Builder[Double](rows=conf.users(), cols=conf.movies()) 
     for (line <- testFile.getLines) {
         val cols = line.split(conf.separator()).map(_.trim)
-        testBuilder.add(cols(0).toInt-1, cols(1).toInt-1, cols(2).toDouble)
+        testBuilder.add(cols(0).toInt - 1, cols(1).toInt - 1, cols(2).toDouble)
     }
     val test = testBuilder.result()
     testFile.close
 
+    //*****************************************************************************************************************
+
     println("Compute predictions on test data...")
+
+    //*****************************************************************************************************************
 
     // Save answers as JSON
     def printToFile(content: String,

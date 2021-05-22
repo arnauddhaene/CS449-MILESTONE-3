@@ -7,6 +7,8 @@ import scala.collection.mutable.ArrayBuffer
 
 import CSCMatrixFunctions._
 
+//*****************************************************************************************************************
+
 class Conf(arguments: Seq[String]) extends ScallopConf(arguments) {
   val train = opt[String](required = true)
   val test = opt[String](required = true)
@@ -17,6 +19,8 @@ class Conf(arguments: Seq[String]) extends ScallopConf(arguments) {
   val separator = opt[String](default=Option("\t"))
   verify()
 }
+
+//*****************************************************************************************************************
 
 class CSCMatrixFunctions(data : CSCMatrix[Double]) {
 
@@ -37,6 +41,9 @@ class CSCMatrixFunctions(data : CSCMatrix[Double]) {
 object CSCMatrixFunctions {
     implicit def addCSCMatrixFunctions(data : CSCMatrix[Double]) = new CSCMatrixFunctions(data)
 }
+
+//*****************************************************************************************************************
+
 
 object Predictor {
   def main(args: Array[String]) {
@@ -377,8 +384,8 @@ object Predictor {
 
           val answers: Map[String, Any] = Map(
             "Q3.3.1" -> Map(
-              "MaeForK=100" -> sum(abs(mae(test, predictions100))) / sum(test.activeMask), // Datatype of answer: Double
-              "MaeForK=200" -> sum(abs(mae(test, predictions200))) / sum(test.activeMask)  // Datatype of answer: Double
+              "MaeForK=100" -> sum(mae(test, predictions100)) / test.activeSize, // Datatype of answer: Double
+              "MaeForK=200" -> sum(mae(test, predictions200)) / test.activeSize  // Datatype of answer: Double
             ),
             "Q3.3.2" ->  Map(
               "DurationInMicrosecForComputingKNN" -> Map(
@@ -401,7 +408,7 @@ object Predictor {
           json = Serialization.writePretty(answers)
         }
 
-        // println(json)
+        println(json)
         println("Saving answers in: " + jsonFile)
         printToFile(json, jsonFile)
       }
