@@ -214,48 +214,43 @@ object Predictor {
       *
       * @param kNearestNeighbors
       * @param normalizedDeviations
+      * @param userAverages
       * 
       * @return CSCMatrix[Double] of user specific weighted sum deviations
       */
-    def weightedSumDeviations(
-        kNearestNeighbors: CSCMatrix[Double], normalizedDeviations: CSCMatrix[Double]
+    def predictor(
+        test: CSCMatrix[Double], kNearestNeighbors: CSCMatrix[Double],
+        normalizedDeviations: CSCMatrix[Double], userAverages: DenseVector[Double]
     ): CSCMatrix[Double] = {
 
         val nbUsers = normalizedDeviations.cols
+        val nbItems = normalizedDeviations.rows
 
-        val deviationsBuilder = new CSCMatrix.Builder[Double](rows = nbUsers,
-                                                              cols = normalizedDeviations.rows)
+        val predictionBuilder = new CSCMatrix.Builder[Double](rows = nbUsers, cols = nbItems)
 
+        val nDevs = normalizedDeviations
 
         (0 to nbUsers - 1).foreach(
             u => {
                 val neighs = kNearestNeighbors(u, 0 to nbUsers - 1).t.toDenseVector
 
-                val userNum = normalizedDeviations * neighs
-                val userDenom = normalizedDeviations.activeMask * abs(neighs)
+                val uAvg = userAverages(u)
+                val userNum = nDevs * neighs
+                val userDenom = nDevs.activeMask * abs(neighs)
 
-                for ((v, r) <- userNum.activeIterator) {
-                    val clippedWeigSumDev = if (userDenom(v) != 0.0) r / userDenom(v) else 0.0
+                for ((i, r) <- userNum.activeIterator) {
 
-                    deviationsBuilder.add(u, v, clippedWeigSumDev)
+                    // Store prediction only if it is needed
+                    if (test(u, i) != 0.0) {
+
+                        val uDev = if (userDenom(i) != 0.0) r / userDenom(i) else 0.0
+
+                        predictionBuilder.add(u, i, uAvg + uDev * scaler(uAvg + uDev, uAvg))
+
+                    }
                 }
             }
         )
-
-        return deviationsBuilder.result()
-
-    }
-
-    def predictor(userSpecWeightDev : CSCMatrix[Double], test : CSCMatrix[Double]): CSCMatrix[Double] = {
-    
-        val predictionBuilder = new CSCMatrix.Builder[Double](rows = test.rows, cols = test.cols)
-
-        for ( ((u, i), r) <- test.activeIterator ) {
-            val uAvg = userAverages(u)
-            val uDev = userSpecWeightDev(u, i)
-
-            predictionBuilder.add(u, i, uAvg + uDev * scaler(uAvg + uDev, uAvg))
-        }
 
         return predictionBuilder.result()
 
@@ -265,16 +260,14 @@ object Predictor {
 
     val prediction_start = System.nanoTime
 
-    val userSpecWeightDev100 = weightedSumDeviations(neighbors100, trainNormalized)
-    val predictions100 = predictor(userSpecWeightDev100, test)
+    val predictions100 = predictor(test, neighbors100, trainNormalized, userAverages)
         
     val prediction_duration = System.nanoTime - prediction_start
     println(s"Compute predictions on test data... [${(prediction_duration/pow(10.0, 9))} sec]")
 
     //*****************************************************************************************************************
     
-    val userSpecWeightDev200 = weightedSumDeviations(neighbors200, trainNormalized)
-    val predictions200 = predictor(userSpecWeightDev200, test)
+    val predictions200 = predictor(test, neighbors200, trainNormalized, userAverages)
 
     //*****************************************************************************************************************
 
@@ -345,8 +338,7 @@ object Predictor {
         
         val timeSimilarities = System.nanoTime() - start
         
-        val userSpecWeightDev = weightedSumDeviations(neighbors, trainNormalized)
-        val predictions = predictor(userSpecWeightDev, test)
+        val predictions = predictor(test, neighbors, trainNormalized, userAverages)
         
         val timeTotal = System.nanoTime() - start
 
@@ -359,6 +351,8 @@ object Predictor {
     val timeVectors = (1 to 5).map(iter => {
         println(s"Iteration $iter")
         (time(train, test))
+        // TODO: remove 
+        // (0.0, 0.0)
     }).unzip
 
     val timeForSimilarities = timeVectors._1

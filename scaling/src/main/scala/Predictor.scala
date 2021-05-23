@@ -14,6 +14,7 @@ import org.apache.log4j.Level
 
 import CSCMatrixFunctions._
 
+
 class Conf(arguments: Seq[String]) extends ScallopConf(arguments) {
   val train = opt[String](required = true)
   val test = opt[String](required = true)
@@ -79,6 +80,9 @@ object Predictor {
     println("Read data in " + (read_duration/pow(10.0, 9)) + "s")
 
     //*****************************************************************************************************************
+
+    val ANSI_GREEN = "\u001B[32m"
+    val ANSI_RESET = "\u001B[0m"
 
     /**
       * Computes x scaled by the user average rating.
@@ -197,15 +201,13 @@ object Predictor {
     val conf_k = conf.k()
     println("Compute kNN on train data...")
 
+    val knn_start = System.nanoTime
+
     val userAverages = train.perRowAverage
     val trainNormalized = normalizedDeviations(train, userAverages)
     val processed = preprocess(trainNormalized)
 
-    println("\t computed processed ratings")
-
     val brProcessed = sc.broadcast(processed)
-
-    println("\t sent processed ratings to broadcast variable")
 
     //*****************************************************************************************************************
 
@@ -228,11 +230,7 @@ object Predictor {
 
     val topks = sc.parallelize(0 to conf_users - 1).map(topk).collect()
 
-    println("\t parallelized and collected topk computation")
-
     val knnBuilder = new CSCMatrix.Builder[Double](rows = conf_users, cols = conf_users)
-
-    println("\t initialized knn builder")
 
     topks.foreach {
         case (u, lvs) => {
@@ -244,7 +242,9 @@ object Predictor {
 
     val neighbors = knnBuilder.result()
 
-    println("\t retrieved knn builder result")
+    val knn_duration = System.nanoTime - knn_start
+
+    println(s"$ANSI_GREEN[SUCCESS]$ANSI_RESET KNN computed on training data [${knn_duration / 1e9d} sec]")
 
     //*****************************************************************************************************************
 
@@ -297,21 +297,6 @@ object Predictor {
 
     }
 
-    def predictor(userSpecWeightDev : CSCMatrix[Double], test : CSCMatrix[Double]): CSCMatrix[Double] = {
-    
-        val predictionBuilder = new CSCMatrix.Builder[Double](rows = test.rows, cols = test.cols)
-
-        for ( ((u, i), r) <- test.activeIterator ) {
-            val uAvg = userAverages(u)
-            val uDev = userSpecWeightDev(u, i)
-
-            predictionBuilder.add(u, i, uAvg + uDev * scaler(uAvg + uDev, uAvg))
-        }
-
-        return predictionBuilder.result()
-
-    }
-
     /**
       * Mean Absolute Error of our predictions
       *
@@ -324,20 +309,32 @@ object Predictor {
 
     //*****************************************************************************************************************
 
-    val userSpecWeightDev = weightedSumDeviations(neighbors, trainNormalized)
+    println("Compute predictions on test data...")
 
-    val brWeightedSumDev = sc.broadcast(userSpecWeightDev)
+    val prediction_start = System.nanoTime
+
+    val brNeighbors = sc.broadcast(neighbors)
+    val brNormalizedDeviations = sc.broadcast(trainNormalized)
     val brUserAverages = sc.broadcast(train.perRowAverage)
 
     //*****************************************************************************************************************
 
     def predict(user: Int, item: Int): (Int, Int, Double) = {
 
-        val userSpecWeightDev = brWeightedSumDev.value
+        // fetch broadcast variables
+        val kNearestNeighbors = brNeighbors.value
+        val normalizedDeviations = brNormalizedDeviations.value
         val userAverages = brUserAverages.value
 
         val uAvg = userAverages(user)
-        val uDev = userSpecWeightDev(user, item)
+
+        // Compute user weighted deviation
+        val neighs = kNearestNeighbors(u, 0 to conf_users - 1).t.toDenseVector
+
+        val userNum = normalizedDeviations * neighs
+        val userDenom = normalizedDeviations.activeMask * abs(neighs)
+
+        val uDev = if (userDenom(v) != 0.0) r / userDenom(v) else 0.0
 
         return (user, item, uAvg + uDev * scaler(uAvg + uDev, uAvg))
 
@@ -345,10 +342,9 @@ object Predictor {
 
     //*****************************************************************************************************************
 
-    val prediction_start = System.nanoTime
-
     val parPredictions = sc.parallelize(test.findAll(_ > 0.0))
-        .map { case (u, i) => predict(u, i) }.collect()
+        .map { case (u, i) => predict(u, i) }
+        .collect()
 
     val predictionBuilder = new CSCMatrix.Builder[Double](rows = conf_users, cols = conf_movies)
 
@@ -359,7 +355,8 @@ object Predictor {
     val predictions = predictionBuilder.result()
         
     val prediction_duration = System.nanoTime - prediction_start
-    println(s"Compute predictions on test data... [${(prediction_duration/pow(10.0, 9))} sec]")
+
+    println(s"$ANSI_GREEN[SUCCESS]$ANSI_RESET predictions computed on test set [${(prediction_duration / pow(10.0, 9))} sec]")
 
     //*****************************************************************************************************************
 
@@ -385,10 +382,10 @@ object Predictor {
             ),
             // Both Q4.1.2 and Q4.1.3 should provide measurement only for a single run
             "Q4.1.2" ->  Map(
-              "DurationInMicrosecForComputingKNN" -> 0.0  // Datatype of answer: Double
+              "DurationInMicrosecForComputingKNN" -> knn_duration / 1e3d // Datatype of answer: Double
             ),
             "Q4.1.3" ->  Map(
-              "DurationInMicrosecForComputingPredictions" -> 0.0 // Datatype of answer: Double  
+              "DurationInMicrosecForComputingPredictions" -> prediction_duration / 1e3d // Datatype of answer: Double  
             )
             // Answer the other questions of 4.1.2 and 4.1.3 in your report
            )
