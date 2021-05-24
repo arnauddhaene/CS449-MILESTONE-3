@@ -113,10 +113,10 @@ object Predictor {
     ): CSCMatrix[Double] = {
 
         // ATTENTION: NORMALIZED DEVIATIONS ARE IMPLICITLY TRANSPOSED FOR DOWNSTREAM PURPOSES
-        val normDevBuilder = new CSCMatrix.Builder[Double](rows = ratings.cols, cols = ratings.rows)
+        val normDevBuilder = new CSCMatrix.Builder[Double](rows = ratings.rows, cols = ratings.cols)
     
         for ( ((u, i), r) <- ratings.activeIterator) {
-            normDevBuilder.add(i, u, 1.0 * (r - userAverages(u)) / scaler(r, userAverages(u)).toDouble)
+            normDevBuilder.add(u, i, 1.0 * (r - userAverages(u)) / scaler(r, userAverages(u)).toDouble)
         }
 
         return normDevBuilder.result()
@@ -130,13 +130,13 @@ object Predictor {
       */
     def preprocess(trainNormalized: CSCMatrix[Double]): CSCMatrix[Double] = {
 
-        val processBuilder = new CSCMatrix.Builder[Double](rows = trainNormalized.cols,
-                                                           cols = trainNormalized.rows)
+        val processBuilder = new CSCMatrix.Builder[Double](rows = trainNormalized.rows,
+                                                           cols = trainNormalized.cols)
 
         val cosineSimilarityDenominator = 
-            sqrt(pow(trainNormalized, 2).t * DenseVector.ones[Double](trainNormalized.rows))
+            sqrt(pow(trainNormalized, 2) * DenseVector.ones[Double](trainNormalized.cols))
 
-        for ( ((i, u), r) <- trainNormalized.activeIterator ) {
+        for ( ((u, i), r) <- trainNormalized.activeIterator ) {
 
             val clippedRes = if (cosineSimilarityDenominator(u) != 0.0) r / cosineSimilarityDenominator(u) else 0.0
 
@@ -182,7 +182,7 @@ object Predictor {
                 val userSimilarities = cosineSimilarities(processed, u)
 
                 for (v <- argtopk(userSimilarities, k)) {
-                    neighborBuilder.add(u, v, userSimilarities(v))
+                    neighborBuilder.add(v, u, userSimilarities(v))
                 }
             }
         )
@@ -192,7 +192,6 @@ object Predictor {
     }
 
     //*****************************************************************************************************************
-
 
     // conf object is not serializable, extract values that
     // will be serialized with the parallelize implementations
@@ -219,9 +218,8 @@ object Predictor {
       * @return top k cosine similarities
       */
     def topk(user: Int): (Int, IndexedSeq[(Int, Double)]) = {
-        val processed = brProcessed.value
 
-        val userSimilarities = cosineSimilarities(processed, user)
+        val userSimilarities = cosineSimilarities(brProcessed.value, user)
 
         return (user, argtopk(userSimilarities, conf_k).map(v => (v, userSimilarities(v))))
     }
@@ -235,7 +233,7 @@ object Predictor {
     topks.foreach {
         case (u, lvs) => {
             lvs.foreach {
-                case (v, s) => knnBuilder.add(u, v, s)
+                case (v, s) => knnBuilder.add(v, u, s)
             }
         }
     }
@@ -261,40 +259,36 @@ object Predictor {
     //*****************************************************************************************************************
 
     /**
-      * User Specific Weighted Sum Deviations
+      * User Specific Weighted Sum Deviation
       *
+      * @param user
+      * @param item 
       * @param kNearestNeighbors
       * @param normalizedDeviations
       * 
-      * @return CSCMatrix[Double] of user specific weighted sum deviations
+      * @return Double
       */
-    def weightedSumDeviations(
-        kNearestNeighbors: CSCMatrix[Double], normalizedDeviations: CSCMatrix[Double]
-    ): CSCMatrix[Double] = {
+    def userSpecificWeightedSumDeviation(
+      user: Int, item: Int,
+      kNearestNeighbors: CSCMatrix[Double], normalizedDeviations: CSCMatrix[Double]
+    ): Double = {
 
-        val nbUsers = normalizedDeviations.cols
+        val nbUsers = kNearestNeighbors.cols
 
-        val deviationsBuilder = new CSCMatrix.Builder[Double](rows = nbUsers,
-                                                              cols = normalizedDeviations.rows)
+        val userDevRatings = normalizedDeviations(0 to nbUsers - 1, item).toDenseVector
+        val userNeighbors = kNearestNeighbors(0 to nbUsers - 1, user).toDenseVector
 
+        var userNum = 0.0
+        var userDenom = 0.0
 
-        (0 to nbUsers - 1).foreach(
-            u => {
-                val neighs = kNearestNeighbors(u, 0 to nbUsers - 1).t.toDenseVector
+        for ((v, r) <- userDevRatings.activeIterator) {
 
-                val userNum = normalizedDeviations * neighs
-                val userDenom = normalizedDeviations.activeMask * abs(neighs)
+            userNum = userNum + r * userNeighbors(v)
+            userDenom = userDenom + (if (r != 0.0) math.abs(userNeighbors(v)) else 0.0)
 
-                for ((v, r) <- userNum.activeIterator) {
-                    val clippedWeigSumDev = if (userDenom(v) != 0.0) r / userDenom(v) else 0.0
+        }
 
-                    deviationsBuilder.add(u, v, clippedWeigSumDev)
-                }
-            }
-        )
-
-        return deviationsBuilder.result()
-
+        return if (userDenom != 0.0) userNum / userDenom else 0.0
     }
 
     /**
@@ -321,20 +315,8 @@ object Predictor {
 
     def predict(user: Int, item: Int): (Int, Int, Double) = {
 
-        // fetch broadcast variables
-        val kNearestNeighbors = brNeighbors.value
-        val normalizedDeviations = brNormalizedDeviations.value
-        val userAverages = brUserAverages.value
-
-        val uAvg = userAverages(user)
-
-        // Compute user weighted deviation
-        val neighs = kNearestNeighbors(u, 0 to conf_users - 1).t.toDenseVector
-
-        val userNum = normalizedDeviations * neighs
-        val userDenom = normalizedDeviations.activeMask * abs(neighs)
-
-        val uDev = if (userDenom(v) != 0.0) r / userDenom(v) else 0.0
+        val uAvg = brUserAverages.value(user)
+        val uDev = userSpecificWeightedSumDeviation(user, item, brNeighbors.value, brNormalizedDeviations.value)
 
         return (user, item, uAvg + uDev * scaler(uAvg + uDev, uAvg))
 

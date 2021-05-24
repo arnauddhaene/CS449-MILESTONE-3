@@ -102,14 +102,22 @@ the number of executors to use, when running locally.
 
 From directory ````scaling````:
 ````
-spark-submit --master MASTER target/scala-2.11/m3_yourid-assembly-1.0.jar --train ../data/ml-100k/u1.base --test ../data/ml-100k/u1.test --k 200 --json scaling-100k.json --users 943 --movies 1682 --separator "\t"
+spark-submit --master yarn --num-executors 5 target/scala-2.11/m3_269883-assembly-1.0.jar --train ../data/ml-100k/u1.base --test ../data/ml-100k/u1.test --k 200 --json scaling-100k.json --users 943 --movies 1682 --separator "\t"
+````
+
+````
+spark-submit --master "local[5]" target/scala-2.11/m3_269883-assembly-1.0.jar --train ../data/ml-100k/u1.base --test ../data/ml-100k/u1.test --k 200 --json scaling-100k.json --users 943 --movies 1682 --separator "\t"
 ````
 
 ### ml-1m
 
 From directory ````scaling````:
 ````
-spark-submit --master MASTER target/scala-2.11/m3_yourid-assembly-1.0.jar --train ../data/ml-1m/ra.train     --test ../data/ml-1m/ra.test --k 200 --json scaling-1m.json --users 6040 --movies 3952 --separator "::"
+spark-submit --master yarn --num-executors 5 target/scala-2.11/m3_269883-assembly-1.0.jar --train ../data/ml-1m/ra.train     --test ../data/ml-1m/ra.test --k 200 --json scaling-1m.json --users 6040 --movies 3952 --separator "::"
+````
+
+````
+spark-submit --master "local[5]" target/scala-2.11/m3_269883-assembly-1.0.jar --train ../data/ml-1m/ra.train     --test ../data/ml-1m/ra.test --k 200 --json scaling-1m.json --users 6040 --movies 3952 --separator "::"
 ````
 
 ## Compute economics results

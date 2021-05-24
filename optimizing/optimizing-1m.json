@@ -1,0 +1,22 @@
+{
+  "Q3.3.1" : {
+    "MaeForK=100" : 0.7537400906694126,
+    "MaeForK=200" : 0.734624743681844
+  },
+  "Q3.3.2" : {
+    "DurationInMicrosecForComputingKNN" : {
+      "min" : 1.6454933276E7,
+      "max" : 1.7189382883E7,
+      "average" : 1.67348847148E7,
+      "stddev" : 297502.0881209219
+    }
+  },
+  "Q3.3.3" : {
+    "DurationInMicrosecForComputingPredictions" : {
+      "min" : 7.2688515481E7,
+      "max" : 7.5427606183E7,
+      "average" : 7.42200124152E7,
+      "stddev" : 947163.7929317686
+    }
+  }
+}

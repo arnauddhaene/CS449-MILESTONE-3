@@ -96,10 +96,10 @@ object Predictor {
     ): CSCMatrix[Double] = {
 
         // ATTENTION: NORMALIZED DEVIATIONS ARE IMPLICITLY TRANSPOSED FOR DOWNSTREAM PURPOSES
-        val normDevBuilder = new CSCMatrix.Builder[Double](rows = ratings.cols, cols = ratings.rows)
+        val normDevBuilder = new CSCMatrix.Builder[Double](rows = ratings.rows, cols = ratings.cols)
     
         for ( ((u, i), r) <- ratings.activeIterator) {
-            normDevBuilder.add(i, u, 1.0 * (r - userAverages(u)) / scaler(r, userAverages(u)).toDouble)
+            normDevBuilder.add(u, i, 1.0 * (r - userAverages(u)) / scaler(r, userAverages(u)).toDouble)
         }
 
         return normDevBuilder.result()
@@ -113,13 +113,13 @@ object Predictor {
       */
     def preprocess(trainNormalized: CSCMatrix[Double]): CSCMatrix[Double] = {
 
-        val processBuilder = new CSCMatrix.Builder[Double](rows = trainNormalized.cols,
-                                                           cols = trainNormalized.rows)
+        val processBuilder = new CSCMatrix.Builder[Double](rows = trainNormalized.rows,
+                                                           cols = trainNormalized.cols)
 
         val cosineSimilarityDenominator = 
-            sqrt(pow(trainNormalized, 2).t * DenseVector.ones[Double](trainNormalized.rows))
+            sqrt(pow(trainNormalized, 2) * DenseVector.ones[Double](trainNormalized.cols))
 
-        for ( ((i, u), r) <- trainNormalized.activeIterator ) {
+        for ( ((u, i), r) <- trainNormalized.activeIterator ) {
 
             val clippedRes = if (cosineSimilarityDenominator(u) != 0.0) r / cosineSimilarityDenominator(u) else 0.0
 
@@ -165,7 +165,7 @@ object Predictor {
                 val userSimilarities = cosineSimilarities(processed, u)
 
                 for (v <- argtopk(userSimilarities, k)) {
-                    neighborBuilder.add(u, v, userSimilarities(v))
+                    neighborBuilder.add(v, u, userSimilarities(v))
                 }
             }
         )
@@ -210,8 +210,43 @@ object Predictor {
     //*****************************************************************************************************************
 
     /**
-      * User Specific Weighted Sum Deviations
+      * User Specific Weighted Sum Deviation
       *
+      * @param user
+      * @param item 
+      * @param kNearestNeighbors
+      * @param normalizedDeviations
+      * 
+      * @return Double
+      */
+    def userSpecificWeightedSumDeviation(
+      user: Int, item: Int,
+      kNearestNeighbors: CSCMatrix[Double], normalizedDeviations: CSCMatrix[Double]
+    ): Double = {
+
+        val nbUsers = kNearestNeighbors.cols
+
+        val userDevRatings = normalizedDeviations(0 to nbUsers - 1, item).toDenseVector
+        val userNeighbors = kNearestNeighbors(0 to nbUsers - 1, user).toDenseVector
+
+        var userNum = 0.0
+        var userDenom = 0.0
+
+        for ((v, r) <- userDevRatings.activeIterator) {
+
+            userNum = userNum + r * userNeighbors(v)
+            userDenom = userDenom + (if (r != 0.0) math.abs(userNeighbors(v)) else 0.0)
+
+        }
+
+        return if (userDenom != 0.0) userNum / userDenom else 0.0
+    }
+
+
+    /**
+      * Predictor
+      *
+      * @param test
       * @param kNearestNeighbors
       * @param normalizedDeviations
       * @param userAverages
@@ -223,34 +258,21 @@ object Predictor {
         normalizedDeviations: CSCMatrix[Double], userAverages: DenseVector[Double]
     ): CSCMatrix[Double] = {
 
-        val nbUsers = normalizedDeviations.cols
-        val nbItems = normalizedDeviations.rows
+        val nbUsers = normalizedDeviations.rows
+        val nbItems = normalizedDeviations.cols
 
         val predictionBuilder = new CSCMatrix.Builder[Double](rows = nbUsers, cols = nbItems)
 
         val nDevs = normalizedDeviations
 
-        (0 to nbUsers - 1).foreach(
-            u => {
-                val neighs = kNearestNeighbors(u, 0 to nbUsers - 1).t.toDenseVector
+        for ( ((user, item), rating) <- test.activeIterator ) {
 
-                val uAvg = userAverages(u)
-                val userNum = nDevs * neighs
-                val userDenom = nDevs.activeMask * abs(neighs)
+            val uAvg = userAverages(user)
+            val uDev = userSpecificWeightedSumDeviation(user, item, kNearestNeighbors, normalizedDeviations)
 
-                for ((i, r) <- userNum.activeIterator) {
+            predictionBuilder.add(user, item, uAvg + uDev * scaler(uAvg + uDev, uAvg))
 
-                    // Store prediction only if it is needed
-                    if (test(u, i) != 0.0) {
-
-                        val uDev = if (userDenom(i) != 0.0) r / userDenom(i) else 0.0
-
-                        predictionBuilder.add(u, i, uAvg + uDev * scaler(uAvg + uDev, uAvg))
-
-                    }
-                }
-            }
-        )
+        }
 
         return predictionBuilder.result()
 
