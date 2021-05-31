@@ -43,7 +43,7 @@ object Economics {
 
     val RPi_w_M7_PRICE = (PRICE_M7 / PRICE_RPi).floor
 
-    def USERS_IN(bytes: Double) = (0.5 * (math.sqrt(bytes + 625) - 25)).floor
+    def USERS_IN(bytes: Double) = (bytes / 900.0).floor
 
     // Save answers as JSON
     def printToFile(content: String,

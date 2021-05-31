@@ -14,9 +14,9 @@
     "MinYearsOfRentingICC.M7" : 4.700510341122751
   },
   "Q5.1.6" : {
-    "NbUserPerGB" : 11167.0,
-    "NbUserPerRPi" : 31610.0,
-    "NbUserPerICC.M7" : 438165.0
+    "NbUserPerGB" : 555555.0,
+    "NbUserPerRPi" : 4444444.0,
+    "NbUserPerICC.M7" : 8.53333333E8
   },
   "Q5.1.3" : {
     "DailyCostICContainer_Eq_4RPi4_Throughput" : 0.476,
