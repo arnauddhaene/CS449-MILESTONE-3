@@ -23,7 +23,7 @@ object Economics {
     val DAYS_PER_YEAR = 365.0
 
     val RATE_PER_GB = 0.012
-    val RATE_PER_vCPU = 0.092
+    val RATE_PER_vCPU = 0.088128
 
     val M7_RAM_GB = 24 * 64
     val M7_TP_vCPU = 28
