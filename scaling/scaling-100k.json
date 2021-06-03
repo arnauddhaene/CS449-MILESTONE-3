@@ -3,9 +3,9 @@
     "MaeForK=200" : 0.748457048681886
   },
   "Q4.1.2" : {
-    "DurationInMicrosecForComputingKNN" : 2431532.13
+    "DurationInMicrosecForComputingKNN" : 2055753.343
   },
   "Q4.1.3" : {
-    "DurationInMicrosecForComputingPredictions" : 1066709.36
+    "DurationInMicrosecForComputingPredictions" : 1060078.612
   }
 }
