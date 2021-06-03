@@ -1,31 +1,31 @@
 {
-    "Q5.1.2": {
-        "DailyCostICContainer_Eq_ICC.M7_RAM_Throughput": 20.899584,
-        "RatioICC.M7_over_Container": 0.9760959835372799,
-        "ContainerCheaperThanICC.M7": false
-    },
-    "Q5.1.5": {
-        "NbRPisForSamePriceAsICC.M7": 369.0,
-        "RatioTotalThroughputRPis_over_ThroughputICC.M7": 1.921875,
-        "RatioTotalRAMRPis_over_RAMICC.M7": 3.294642857142857
-    },
-    "Q5.1.1": {
-        "MinDaysOfRentingICC.M7": 1715.686274509804,
-        "MinYearsOfRentingICC.M7": 4.700510341122751
-    },
-    "Q5.1.6": {
-        "NbUserPerGB": 555555.0,
-        "NbUserPerRPi": 4444444.0,
-        "NbUserPerICC.M7": 8.53333333E8
-    },
-    "Q5.1.3": {
-        "DailyCostICContainer_Eq_4RPi4_Throughput": 0.472128,
-        "Ratio4RPi_over_Container_MaxPower": 0.4575030500203335,
-        "Ratio4RPi_over_Container_MinPower": 0.0915006100040667,
-        "ContainerCheaperThan4RPi": false
-    },
-    "Q5.1.4": {
-        "MinDaysRentingContainerToPay4RPis_MinPower": 885.0,
-        "MinDaysRentingContainerToPay4RPis_MaxPower": 1481.0
-    }
+  "Q5.1.2" : {
+    "DailyCostICContainer_Eq_ICC.M7_RAM_Throughput" : 20.899584,
+    "RatioICC.M7_over_Container" : 0.9760959835372799,
+    "ContainerCheaperThanICC.M7" : false
+  },
+  "Q5.1.5" : {
+    "NbRPisForSamePriceAsICC.M7" : 369.0,
+    "RatioTotalThroughputRPis_over_ThroughputICC.M7" : 3.294642857142857,
+    "RatioTotalRAMRPis_over_RAMICC.M7" : 1.921875
+  },
+  "Q5.1.1" : {
+    "MinDaysOfRentingICC.M7" : 1715.686274509804,
+    "MinYearsOfRentingICC.M7" : 4.700510341122751
+  },
+  "Q5.1.6" : {
+    "NbUserPerGB" : 555555.0,
+    "NbUserPerRPi" : 4444444.0,
+    "NbUserPerICC.M7" : 8.53333333E8
+  },
+  "Q5.1.3" : {
+    "DailyCostICContainer_Eq_4RPi4_Throughput" : 0.472128,
+    "Ratio4RPi_over_Container_MaxPower" : 0.4575030500203335,
+    "Ratio4RPi_over_Container_MinPower" : 0.0915006100040667,
+    "ContainerCheaperThan4RPi" : false
+  },
+  "Q5.1.4" : {
+    "MinDaysRentingContainerToPay4RPis_MinPower" : 885.0,
+    "MinDaysRentingContainerToPay4RPis_MaxPower" : 1481.0
+  }
 }

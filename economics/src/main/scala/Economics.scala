@@ -83,8 +83,8 @@ object Economics {
             ),
             "Q5.1.5" -> Map(
               "NbRPisForSamePriceAsICC.M7" -> RPi_w_M7_PRICE, // Datatype of answer: Double
-              "RatioTotalThroughputRPis_over_ThroughputICC.M7" -> (RPi_w_M7_PRICE * RPi_RAM_GB) / M7_RAM_GB, // Datatype of answer: Double
-              "RatioTotalRAMRPis_over_RAMICC.M7" -> (RPi_w_M7_PRICE * RPi_TP_vCPU) / M7_TP_vCPU// Datatype of answer: Double
+              "RatioTotalThroughputRPis_over_ThroughputICC.M7" -> (RPi_w_M7_PRICE * RPi_TP_vCPU) / M7_TP_vCPU, // Datatype of answer: Double
+              "RatioTotalRAMRPis_over_RAMICC.M7" -> (RPi_w_M7_PRICE * RPi_RAM_GB) / M7_RAM_GB // Datatype of answer: Double
             ),
             "Q5.1.6" ->  Map(
               "NbUserPerGB" -> USERS_IN(0.5 * 1e9d), // Datatype of answer: Double 
